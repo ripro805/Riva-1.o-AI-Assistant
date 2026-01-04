@@ -9,7 +9,7 @@ def run_voice_mode():
     while True:
         command = listen()
         if command:
-            # Voice mode: wake phrase is required, and once awake it stays awake until exit/sleep.
+            # Voice mode: wake phrase is required, and once awake it stays awake until exit.
             process(command, require_wake_word=True)
 
 

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import re
 import time
+import sys
 from datetime import datetime
 
 from speech import speak
@@ -410,6 +411,23 @@ def process(command, require_wake_word: bool = True):
     except Exception:
         pass
 
+    # EXIT COMMAND (hard stop)
+    # User request: when they say "now,Leave" (normalized to "now leave"), say goodbye and exit.
+    # This should work regardless of wake state.
+    try:
+        c_compact = command.replace(" ", "")
+    except Exception:
+        c_compact = command
+    if (
+        command == "now leave"
+        or command == "leave now"
+        or "now leave" in command
+        or "leavenow" in c_compact
+        or "nowleave" in c_compact
+    ):
+        speak("Okay. Goodbye! See you next time.")
+        raise SystemExit(0)
+
     memory = load_memory()
 
     # Handle confirmations first (e.g., shutdown confirmation)
@@ -535,7 +553,7 @@ def process(command, require_wake_word: bool = True):
         speak("Close folder windows: say exit folder.")
         speak("Check battery: say battery.")
         speak("Shutdown PC: say shutdown (I will ask you to confirm).")
-        speak("Sleep: say go to sleep.")
+        speak("Exit: say now leave.")
         speak("Close apps: say close chrome / close vscode / close whatsapp.")
         speak("Close tabs (best effort): close youtube / close facebook / close gmail / close repo.")
         speak("Close current folder window: close folder.")
@@ -543,7 +561,7 @@ def process(command, require_wake_word: bool = True):
         # Mention wake behavior.
         if require_wake_word:
             speak("Voice mode wake phrase: say 'hi riva' or 'hey riva'.")
-            speak("After waking once, you can talk normally until you say go to sleep.")
+            speak("After waking once, you can talk normally until you exit.")
         else:
             speak("Text mode: wake phrase is optional.")
 
@@ -675,23 +693,6 @@ def process(command, require_wake_word: bool = True):
         memory["pending_action"] = "shutdown"
         memory["pending_url"] = None
         save_memory(memory)
-
-    elif command.strip() == "go to sleep":
-        # SLEEP COMMAND
-        # - Stop responding / stop voice output (after this single response)
-        # - Do NOT close any apps/tabs/folders
-        speak("Going to sleep.")
-
-        # Reset wake state so next time requires wake again.
-        try:
-            memory["awake_until"] = 0.0
-            memory["wake_reminder_until"] = 0.0
-            save_memory(memory)
-        except Exception:
-            pass
-
-        # Do NOT exit the process; remain idle until woken.
-        return
 
     # CLOSE COMMANDS
     elif command.startswith("close "):
