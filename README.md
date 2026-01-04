@@ -1,4 +1,4 @@
-# Riva AI Assistant
+# Riva 1.o-AI-Assistant
 
 Riva is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond in both text and voice mode, perform system tasks, and interact naturally with the user in a friendly way.
 
@@ -17,13 +17,13 @@ Riva is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond in
 
 ### 2. Supported Commands
 
-| Command        | Description                            | Notes / Aliases |
-|---------------|----------------------------------------|-----------------|
-| `open vs code` | Opens Visual Studio Code               | Also accepts: `open vscode`, `open this code`, `open base code`, `open best code` |
-| `open folder`  | Opens the current folder in Explorer   | - |
-| `battery`      | Speaks the current battery percentage  | - |
-| `shutdown`     | Shuts down the PC after confirmation   | - |
-| `exit` / `sleep` | Stops the assistant                  | - |
+| Command          | Description                           | Notes / Aliases |
+|------------------|---------------------------------------|-----------------|
+| `open vs code`   | Opens Visual Studio Code              | Also accepts: `open vscode`, `open this code`, `open base code`, `open best code` |
+| `open folder`    | Opens the current folder in Explorer  | - |
+| `battery`        | Speaks the current battery percentage | - |
+| `shutdown`       | Shuts down the PC after confirmation  | - |
+| `exit` / `sleep` | Stops the assistant                   | - |
 
 ### 3. Conversation Style
 
