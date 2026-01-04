@@ -152,7 +152,7 @@ def _match_site_target(command: str) -> tuple[str, str] | None:
 
 
 def _close_explorer_windows() -> bool:
-    """Best-effort: close open File Explorer windows on Windows."""
+    """Best-effort: close all open File Explorer windows on Windows."""
     if not os.name == "nt":
         return False
     try:
@@ -170,6 +170,36 @@ def _close_explorer_windows() -> bool:
             stderr=subprocess.DEVNULL,
         )
         return True
+    except Exception:
+        return False
+
+
+def _close_active_explorer_window() -> bool:
+    """Close only the currently active File Explorer window (Windows best-effort)."""
+    if not os.name == "nt":
+        return False
+    try:
+        # Match the active explorer window by HWND.
+        # If the foreground window isn't explorer, do nothing.
+        ps = (
+            "Add-Type @'\n"
+            "using System;\n"
+            "using System.Runtime.InteropServices;\n"
+            "public class Win32 {\n"
+            "  [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();\n"
+            "}\n"
+            "'@; "
+            "$hwnd=[Win32]::GetForegroundWindow(); "
+            "$wins=(New-Object -ComObject Shell.Application).Windows(); "
+            "$w=$wins | Where-Object { $_.FullName -like '*\\explorer.exe' -and $_.HWND -eq $hwnd } | Select-Object -First 1; "
+            "if ($null -ne $w) { $w.Quit(); 'CLOSED' } else { 'NOACTIVE' }"
+        )
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-Command", ps],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        return out.upper() == "CLOSED"
     except Exception:
         return False
 
@@ -220,6 +250,102 @@ def _close_common_apps_opened_by_riva() -> None:
     _taskkill("WhatsApp.exe")
     _taskkill("WhatsAppApp.exe")
     _taskkill("WhatsAppDesktop.exe")
+
+
+def _close_app_target(target: str) -> bool:
+    """Close a supported application target. Returns True if we attempted a close."""
+    t = (target or "").strip().lower()
+    if t in ("vscode", "vs code", "visual studio code"):
+        return _taskkill("Code.exe")
+    if t in ("whatsapp", "what's app", "what app"):
+        # WhatsApp Desktop variants
+        attempted = False
+        attempted = _taskkill("WhatsApp.exe") or attempted
+        attempted = _taskkill("WhatsAppApp.exe") or attempted
+        attempted = _taskkill("WhatsAppDesktop.exe") or attempted
+        return attempted
+    if t in ("chrome", "google chrome"):
+        return _taskkill("chrome.exe")
+    return False
+
+
+def _is_process_running(image_name: str) -> bool:
+    """Return True if a process with this image name appears to be running."""
+    try:
+        target = (image_name or "").lower()
+        for p in psutil.process_iter(["name"]):
+            name = (p.info.get("name") or "").lower()
+            if name == target:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def _close_active_chrome_tab_for_target(target: str) -> str:
+    """Best-effort: close the active Chrome tab if it matches target.
+
+    Returns one of: CLOSED, NOTCHROME, NOURL, NOTMATCH, ERROR
+
+    Note:
+    - This does not enumerate tabs. It only inspects the *active* Chrome window/tab
+      using SendKeys + clipboard.
+    - Requires Chrome to be the foreground window.
+    """
+    if not os.name == "nt":
+        return "ERROR"
+
+    t = (target or "").strip().lower()
+    if t == "youtube":
+        patterns = ["youtube.com", "youtu.be"]
+    elif t == "facebook":
+        patterns = ["facebook.com"]
+    elif t == "gmail":
+        patterns = ["mail.google.com", "gmail.com"]
+    elif t in ("repo", "github"):
+        patterns = ["github.com/ripro805/riva-1.o-ai-assistant", "github.com/ripro805"]
+    else:
+        return "ERROR"
+
+    # Use PowerShell in STA mode for Clipboard.
+    try:
+        ps = (
+            "Add-Type @'\n"
+            "using System;\n"
+            "using System.Runtime.InteropServices;\n"
+            "public class Win32 {\n"
+            "  [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();\n"
+            "  [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);\n"
+            "}\n"
+            "'@; "
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$hwnd=[Win32]::GetForegroundWindow(); "
+            "$pid=0; [Win32]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null; "
+            "if ($pid -le 0) { 'ERROR'; exit } ; "
+            "$p=Get-Process -Id $pid -ErrorAction SilentlyContinue; "
+            "if ($null -eq $p) { 'ERROR'; exit } ; "
+            "if ($p.ProcessName -ne 'chrome') { 'NOTCHROME'; exit } ; "
+            "[System.Windows.Forms.SendKeys]::SendWait('^l'); Start-Sleep -Milliseconds 120; "
+            "[System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 120; "
+            "$url=[System.Windows.Forms.Clipboard]::GetText(); "
+            "if ([string]::IsNullOrWhiteSpace($url)) { 'NOURL'; exit } ; "
+            "$u=$url.ToLowerInvariant(); "
+            "$patterns=@('" + "','".join(patterns) + "'); "
+            "$match=$false; foreach ($pat in $patterns) { if ($u -like ('*' + $pat + '*')) { $match=$true } } ; "
+            "if (-not $match) { 'NOTMATCH'; exit } ; "
+            "[System.Windows.Forms.SendKeys]::SendWait('^w'); 'CLOSED'"
+        )
+        out = subprocess.check_output(
+            ["powershell", "-STA", "-NoProfile", "-Command", ps],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        out_u = out.upper()
+        if out_u in ("CLOSED", "NOTCHROME", "NOURL", "NOTMATCH"):
+            return out_u
+        return "ERROR"
+    except Exception:
+        return "ERROR"
 
 
 def _intro_text() -> str:
@@ -341,22 +467,7 @@ def process(command, require_wake_word: bool = True):
             memory["wake_reminder_until"] = 0.0
             save_memory(memory)
         elif not is_awake:
-            # If they try to give a command while asleep, remind (with cooldown).
-            looks_like_command = any(k in command for k in (
-                "open",
-                "battery",
-                "shutdown",
-                "time",
-                "go to sleep",
-                "help",
-                "commands",
-            ))
-            if looks_like_command:
-                remind_until = float(memory.get("wake_reminder_until") or 0.0)
-                if now >= remind_until:
-                    speak("Say 'hi riva' or 'hey riva' first.")
-                    memory["wake_reminder_until"] = now + _DEFAULT_WAKE_REMINDER_COOLDOWN_SEC
-                    save_memory(memory)
+            # Strict sleep/idle behavior: stay silent until wake phrase is used.
             return
     else:
         # In text mode, wake word is optional. If 'riva' appears anywhere, strip it.
@@ -400,7 +511,10 @@ def process(command, require_wake_word: bool = True):
         speak("Close folder windows: say exit folder.")
         speak("Check battery: say battery.")
         speak("Shutdown PC: say shutdown (I will ask you to confirm).")
-        speak("Stop: say go to sleep.")
+        speak("Sleep: say go to sleep.")
+        speak("Close apps: say close chrome / close vscode / close whatsapp.")
+        speak("Close tabs (best effort): close youtube / close facebook / close gmail / close repo.")
+        speak("Close current folder window: close folder.")
 
         # Mention wake behavior.
         if require_wake_word:
@@ -501,10 +615,6 @@ def process(command, require_wake_word: bool = True):
         speak("Opening current folder.")
         os.system("explorer .")
 
-    elif "exit folder" in command or "close folder" in command:
-        speak("Okay. Closing folder windows.")
-        _close_explorer_windows()
-
     elif "open" in command and "folder" in command:
         speak("Did you mean 'open folder'?")
         memory["pending_action"] = "open_folder"
@@ -537,14 +647,10 @@ def process(command, require_wake_word: bool = True):
         save_memory(memory)
 
     elif command.strip() == "go to sleep":
-        speak("Okay. Going to sleep now.")
-
-        # Best-effort: close apps/sites that may have been opened.
-        try:
-            _close_common_apps_opened_by_riva()
-            _close_explorer_windows()
-        except Exception:
-            pass
+        # SLEEP COMMAND
+        # - Stop responding / stop voice output (after this single response)
+        # - Do NOT close any apps/tabs/folders
+        speak("Going to sleep.")
 
         # Reset wake state so next time requires wake again.
         try:
@@ -553,7 +659,52 @@ def process(command, require_wake_word: bool = True):
             save_memory(memory)
         except Exception:
             pass
-        exit()
+
+        # Do NOT exit the process; remain idle until woken.
+        return
+
+    # CLOSE COMMANDS
+    elif command.startswith("close "):
+        target = command[len("close "):].strip()
+        if not target:
+            speak("Please say close and then the target.")
+            return
+
+        # Folder: close ONLY the active explorer window
+        if target in ("folder", "current folder"):
+            closed = _close_active_explorer_window()
+            if closed:
+                speak("The current folder has been closed.")
+            else:
+                speak("That is not currently open.")
+            return
+
+        # Applications
+        if target in ("vscode", "vs code", "visual studio code", "whatsapp", "chrome", "google chrome"):
+            attempted = _close_app_target(target)
+            if attempted:
+                speak("Done.")
+            else:
+                speak("That is not currently open.")
+            return
+
+        # Website tabs: best-effort only.
+        # We don't enumerate tabs; we only inspect the *active* Chrome tab.
+        if target in ("youtube", "facebook", "gmail", "repo", "github"):
+            if not _is_process_running("chrome.exe"):
+                speak("That is not currently open.")
+                return
+
+            result = _close_active_chrome_tab_for_target(target)
+            if result == "CLOSED":
+                speak("Done.")
+            else:
+                # NOTCHROME / NOTMATCH / NOURL / ERROR
+                speak("That is not currently open.")
+            return
+
+        speak("I can't close that target.")
+        return
 
     else:
         speak(random_reply(confused))

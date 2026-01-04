@@ -35,7 +35,15 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 | `time` / `current time` | Speaks the current local time   | Also accepts: `what time` |
 | `open your repo` | Opens this project's GitHub repository | Recommended phrase: `open your repo` |
 | `shutdown`       | Shuts down the PC after confirmation  | - |
-| `go to sleep` | Stops the assistant (and closes apps) | - |
+| `go to sleep` | Puts Riva into sleep/idle mode (no actions) | Does **not** close apps/tabs/folders |
+| `close vscode` | Closes Visual Studio Code (best effort) | - |
+| `close whatsapp` | Closes WhatsApp Desktop (best effort) | - |
+| `close chrome` | Closes Google Chrome (all tabs) | - |
+| `close youtube` | Closes YouTube tab (best effort) | Requires the matching tab to be the **active** Chrome tab |
+| `close facebook` | Closes Facebook tab (best effort) | Requires the matching tab to be the **active** Chrome tab |
+| `close gmail` | Closes Gmail tab (best effort) | Requires the matching tab to be the **active** Chrome tab |
+| `close repo` | Closes GitHub repo tab (best effort) | Requires the matching tab to be the **active** Chrome tab |
+| `close folder` | Closes the **active** File Explorer window | Does not close other folders |
 
 **Note:** If Chrome is not found on your PC, Riva will try to open the website in your default browser.
 
