@@ -35,7 +35,7 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 | `time` / `current time` | Speaks the current local time   | Also accepts: `what time` |
 | `open your repo` | Opens this project's GitHub repository | Recommended phrase: `open your repo` |
 | `shutdown`       | Shuts down the PC after confirmation  | - |
-| `go to sleep` | Stops the assistant (and closes apps) | Also accepts: `sleep`, `exit` |
+| `go to sleep` | Stops the assistant (and closes apps) | - |
 
 **Note:** If Chrome is not found on your PC, Riva will try to open the website in your default browser.
 
@@ -79,7 +79,7 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 
 - `RIVA_AWAKE_WINDOW_SEC`
   - How long (seconds) Riva stays awake after the wake phrase.
-  - Default: effectively "until exit/sleep".
+  - Default: effectively "until go to sleep".
 
 ---
 

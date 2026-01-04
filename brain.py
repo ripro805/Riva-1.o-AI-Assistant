@@ -20,7 +20,7 @@ WAKE_WORD = "riva"
 _WAKE_PREFIX_RE = re.compile(r"^\s*(hi|hey)\s+riva\b[\s,!.:-]*", re.IGNORECASE)
 
 # After a wake phrase, keep accepting commands without repeating the wake phrase.
-# Default is effectively "until exit/sleep".
+# Default is effectively "until go to sleep".
 _DEFAULT_AWAKE_WINDOW_SEC = 60 * 60 * 24 * 365 * 10  # 10 years
 
 # When asleep, don't spam reminders on every sentence.
@@ -228,8 +228,8 @@ def _intro_text() -> str:
 
 def _capabilities_lines() -> list[str]:
     return [
-        "I can: open VS Code, open Chrome, open websites (YouTube/Facebook), open the current folder, check battery, shut down your PC, and exit.",
-        "Try: open vs code; open chrome; open youtube; open folder; battery; shutdown; exit."
+        "I can: open VS Code, open Chrome, open websites (YouTube/Facebook), open the current folder, check battery, shut down your PC, and go to sleep.",
+        "Try: open vs code; open chrome; open youtube; open folder; battery; shutdown; go to sleep."
     ]
 
 
@@ -320,7 +320,7 @@ def process(command, require_wake_word: bool = True):
     # Wake gating.
     # In voice mode (require_wake_word=True), Riva only responds after:
     #   "hi riva" or "hey riva"
-    # After that, she stays awake until you say exit/sleep.
+    # After that, she stays awake until you say go to sleep.
     woke = False
     if require_wake_word:
         now = time.time()
@@ -347,8 +347,7 @@ def process(command, require_wake_word: bool = True):
                 "battery",
                 "shutdown",
                 "time",
-                "exit",
-                "sleep",
+                "go to sleep",
                 "help",
                 "commands",
             ))
@@ -401,7 +400,7 @@ def process(command, require_wake_word: bool = True):
         speak("Close folder windows: say exit folder.")
         speak("Check battery: say battery.")
         speak("Shutdown PC: say shutdown (I will ask you to confirm).")
-        speak("Sleep/Exit: say go to sleep.")
+        speak("Stop: say go to sleep.")
 
         # Mention wake behavior.
         if require_wake_word:
@@ -537,7 +536,7 @@ def process(command, require_wake_word: bool = True):
         memory["pending_url"] = None
         save_memory(memory)
 
-    elif "go to sleep" in command or command.strip() == "sleep" or command.strip() == "exit":
+    elif command.strip() == "go to sleep":
         speak("Okay. Going to sleep now.")
 
         # Best-effort: close apps/sites that may have been opened.
