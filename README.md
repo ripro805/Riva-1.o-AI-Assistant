@@ -30,6 +30,7 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 | `open instagram` | Opens Instagram in Chrome (new tab)   | Also accepts: `open insta` |
 | `open folder`    | Opens the current folder in Explorer  | - |
 | `battery`        | Speaks the current battery percentage | - |
+| `time` / `current time` | Speaks the current local time   | Also accepts: `what time` |
 | `shutdown`       | Shuts down the PC after confirmation  | - |
 | `exit` / `sleep` | Stops the assistant                   | - |
 

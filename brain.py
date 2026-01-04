@@ -4,6 +4,7 @@ import json
 import psutil
 import shutil
 import subprocess
+from datetime import datetime
 
 from speech import speak
 from moods import get_mood
@@ -358,6 +359,16 @@ def process(command, require_wake_word: bool = True):
     elif "battery" in command:
         battery = psutil.sensors_battery()
         speak(f"Battery is {battery.percent} percent.")
+
+    elif (
+        "time" == command
+        or "current time" in command
+        or "what time" in command
+        or "tell me the time" in command
+    ):
+        now = datetime.now()
+        # Example: 09:05 PM
+        speak(f"It's {now.strftime('%I:%M %p')}.".lstrip("0"))
 
     elif "shutdown" in command:
         if mood == "happy":
