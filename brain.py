@@ -302,11 +302,10 @@ def process(command, require_wake_word: bool = True):
     memory["last_command"] = command
     save_memory(memory)
 
-    # If user just woke you up (e.g., "hey riva") with no extra command
+    # If user just woke you up (e.g., "hi riva") with no extra command,
+    # keep it simple and don't read out a long "Try: ..." script.
     if woke and not command:
         speak(_intro_text())
-        for line in _capabilities_lines():
-            speak(line)
         return
 
 
