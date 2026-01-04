@@ -21,9 +21,45 @@ _SITE_TARGETS: list[tuple[str, str, tuple[str, ...]]] = [
     ("YouTube", "https://www.youtube.com/", ("youtube", "you tube")),
     ("Gmail", "https://mail.google.com/", ("gmail", "g mail")),
     ("Google", "https://www.google.com/", ("google",)),
-    ("WhatsApp", "https://web.whatsapp.com/", ("whatsapp", "what's app", "what app")),
+    # Keep WhatsApp Web only for explicit "web" requests.
+    ("WhatsApp Web", "https://web.whatsapp.com/", ("whatsapp web", "web whatsapp", "whats web")),
     ("Instagram", "https://www.instagram.com/", ("instagram", "insta")),
 ]
+
+
+def _open_whatsapp_desktop() -> bool:
+    """Open WhatsApp Desktop app on Windows.
+
+    Returns True if we successfully triggered a launch attempt.
+
+    Notes:
+    - The `whatsapp:` protocol is supported when WhatsApp Desktop is installed.
+    - The AppUserModelId used below is a common Microsoft Store package id; it may vary.
+    """
+    # 1) Try protocol handler (best effort).
+    try:
+        subprocess.Popen(
+            ["cmd", "/c", "start", "", "whatsapp:"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception:
+        pass
+
+    # 2) Try common Microsoft Store AppUserModelId.
+    try:
+        subprocess.Popen(
+            [
+                "explorer.exe",
+                "shell:AppsFolder\\5319275A.WhatsAppDesktop_cv1g1gvanyjgm!App",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception:
+        return False
 
 
 def _find_chrome_exe() -> str | None:
@@ -219,6 +255,8 @@ def process(command, require_wake_word: bool = True):
         speak("Open VS Code: say open vs code.")
         speak("Open Chrome: say open chrome.")
         speak("Open a site in Chrome: say open youtube or open facebook.")
+        speak("Open WhatsApp app: say open whatsapp.")
+        speak("Open WhatsApp Web in Chrome: say open whatsapp web.")
         speak("Open current folder: say open folder.")
         speak("Check battery: say battery.")
         speak("Shutdown PC: say shutdown (I will ask you to confirm).")
@@ -276,6 +314,18 @@ def process(command, require_wake_word: bool = True):
         launched = _open_chrome()
         if not launched:
             speak("I couldn't find Chrome on this PC.")
+
+    # WhatsApp Desktop (prefer app over web)
+    elif (
+        ("open" in command or "start" in command)
+        and ("whatsapp" in command or "what's app" in command or "what app" in command)
+        and "web" not in command
+    ):
+        speak("Opening WhatsApp app.")
+        ok = _open_whatsapp_desktop()
+        if not ok:
+            speak("I couldn't open the WhatsApp app. Opening WhatsApp Web instead.")
+            _open_chrome(url="https://web.whatsapp.com/")
 
     elif (
         ("open" in command or "new tab" in command or "open tab" in command)
