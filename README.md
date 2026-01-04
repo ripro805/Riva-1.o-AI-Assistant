@@ -31,7 +31,7 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 | `open folder`    | Opens the current folder in Explorer  | - |
 | `battery`        | Speaks the current battery percentage | - |
 | `time` / `current time` | Speaks the current local time   | Also accepts: `what time` |
-| `open repo`      | Opens this project's GitHub repository | Also accepts: `open github repo`, `open repository` |
+| `open repo`      | Opens this project's GitHub repository | Also accepts: `open your repo`, `open github repo`, `open repository` |
 | `shutdown`       | Shuts down the PC after confirmation  | - |
 | `exit` / `sleep` | Stops the assistant                   | - |
 

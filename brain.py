@@ -325,6 +325,8 @@ def process(command, require_wake_word: bool = True):
         or "open repository" in command
         or "open github repo" in command
         or "open github repository" in command
+        or "open your repo" in command
+        or "open your repository" in command
         or ("open" in command and "github" in command and "repo" in command)
         or ("open" in command and "github" in command and "repository" in command)
     ):
