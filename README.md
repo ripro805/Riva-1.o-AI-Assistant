@@ -1,4 +1,4 @@
-# Riva1.o AI Assistant
+# Riva 1.0 AI Assistant
 
 Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond in both text and voice mode, perform system tasks, and interact naturally with the user in a friendly way.
 
@@ -11,7 +11,7 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 - When woken up, Riva greets the user and introduces herself.
 - Example:
   - User: "Hey Riva!"
-  - Riva: "Hello! I'm Riva, your AI assistant created by MD. Rifat Islam Rizvi. I can open VS Code, check battery, open folders, shut down your PC, and more. What would you like to do first?"
+  - Riva: "Hello! I'm Riva, your AI assistant created by MD. Rifat Islam Rizvi. I can open VS Code, open Chrome (YouTube/Facebook), check battery, open folders, shut down your PC, and more. What would you like to do first?"
 
 - Fun and playful replies for casual or identity questions.
 
@@ -20,10 +20,19 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 | Command          | Description                           | Notes / Aliases |
 |------------------|---------------------------------------|-----------------|
 | `open vs code`   | Opens Visual Studio Code              | Also accepts: `open vscode`, `open this code`, `open base code`, `open best code` |
+| `open chrome`    | Opens Google Chrome                   | Also accepts: `open google chrome` |
+| `open youtube`   | Opens YouTube in Chrome (new tab)     | Also accepts: `new tab youtube`, `open tab youtube` |
+| `open facebook`  | Opens Facebook in Chrome (new tab)    | Also accepts: `new tab facebook`, `open tab facebook`, `open fb` |
+| `open gmail`     | Opens Gmail in Chrome (new tab)       | - |
+| `open google`    | Opens Google in Chrome (new tab)      | - |
+| `open whatsapp`  | Opens WhatsApp Web in Chrome (new tab)| - |
+| `open instagram` | Opens Instagram in Chrome (new tab)   | Also accepts: `open insta` |
 | `open folder`    | Opens the current folder in Explorer  | - |
 | `battery`        | Speaks the current battery percentage | - |
 | `shutdown`       | Shuts down the PC after confirmation  | - |
 | `exit` / `sleep` | Stops the assistant                   | - |
+
+**Note:** If Chrome is not found on your PC, Riva will try to open the website in your default browser.
 
 ### 3. Conversation Style
 
