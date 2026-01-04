@@ -9,7 +9,7 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 ### 1. Wake-Up & Introduction
 
 - **Voice mode uses a wake phrase:** say **"hi riva"** or **"hey riva"**.
-- After you wake her once, **Riva stays awake until you say `exit` / `sleep`** (so you don't need to repeat the wake phrase).
+- After you wake her once, **Riva stays awake until you say `go to sleep`** (so you don't need to repeat the wake phrase).
 - Example:
   - User: "Hi Riva"
   - Riva: Introduces herself
@@ -33,9 +33,9 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 | `open folder`    | Opens the current folder in Explorer  | - |
 | `battery`        | Speaks the current battery percentage | - |
 | `time` / `current time` | Speaks the current local time   | Also accepts: `what time` |
-| `open repo`      | Opens this project's GitHub repository | Also accepts: `open your repo`, `open github repo`, `open repository` |
+| `open your repo` | Opens this project's GitHub repository | Recommended phrase: `open your repo` |
 | `shutdown`       | Shuts down the PC after confirmation  | - |
-| `exit` / `sleep` | Stops the assistant                   | - |
+| `go to sleep` | Stops the assistant (and closes apps) | Also accepts: `sleep`, `exit` |
 
 **Note:** If Chrome is not found on your PC, Riva will try to open the website in your default browser.
 
@@ -62,7 +62,7 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 
 1. Run the assistant script.
 2. In **voice mode**, wake Riva once by saying: **"hi riva"** or **"hey riva"**.
-3. Then speak commands normally until you say **`exit`** / **`sleep`**.
+3. Then speak commands normally until you say **`go to sleep`**.
 4. In **text mode**, you can type commands directly.
 5. Riva responds in text or voice and performs supported actions.
 

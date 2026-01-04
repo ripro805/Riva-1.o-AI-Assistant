@@ -151,6 +151,77 @@ def _match_site_target(command: str) -> tuple[str, str] | None:
     return None
 
 
+def _close_explorer_windows() -> bool:
+    """Best-effort: close open File Explorer windows on Windows."""
+    if not os.name == "nt":
+        return False
+    try:
+        subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "(New-Object -ComObject Shell.Application).Windows() "
+                "| Where-Object { $_.FullName -like '*\\explorer.exe' } "
+                "| ForEach-Object { $_.Quit() }",
+            ],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _taskkill(image_name: str) -> bool:
+    """Best-effort process close on Windows by image name (e.g., chrome.exe)."""
+    if not os.name == "nt":
+        return False
+
+    # First try without /F (slightly gentler), then force if needed.
+    try:
+        r = subprocess.run(
+            ["taskkill", "/IM", image_name, "/T"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if r.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    try:
+        r = subprocess.run(
+            ["taskkill", "/F", "/IM", image_name, "/T"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _close_common_apps_opened_by_riva() -> None:
+    """Close common apps/sites Riva opens (best effort).
+
+    Note: Sites like YouTube/Facebook/Gmail/Repo are tabs in Chrome.
+    Closing Chrome closes those.
+    """
+    # Chrome covers YouTube/Facebook/Gmail/Repo tabs.
+    _taskkill("chrome.exe")
+
+    # VS Code
+    _taskkill("Code.exe")
+
+    # WhatsApp Desktop variants
+    _taskkill("WhatsApp.exe")
+    _taskkill("WhatsAppApp.exe")
+    _taskkill("WhatsAppDesktop.exe")
+
+
 def _intro_text() -> str:
     return f"Hi! I'm {ASSISTANT_NAME}, your AI assistant created by {CREATOR_NAME}. How can I help you today?"
 
@@ -323,18 +394,19 @@ def process(command, require_wake_word: bool = True):
         speak("Open VS Code: say open vs code.")
         speak("Open Chrome: say open chrome.")
         speak("Open a site in Chrome: say open youtube or open facebook.")
-        speak("Open this project's GitHub repo: say open repo.")
+        speak("Open this project's GitHub repo: say open your repo.")
         speak("Open WhatsApp app: say open whatsapp.")
         speak("Open WhatsApp Web in Chrome: say open whatsapp web.")
         speak("Open current folder: say open folder.")
+        speak("Close folder windows: say exit folder.")
         speak("Check battery: say battery.")
         speak("Shutdown PC: say shutdown (I will ask you to confirm).")
-        speak("Exit: say exit or sleep.")
+        speak("Sleep/Exit: say go to sleep.")
 
         # Mention wake behavior.
         if require_wake_word:
             speak("Voice mode wake phrase: say 'hi riva' or 'hey riva'.")
-            speak("After waking once, you can talk normally until you say exit or sleep.")
+            speak("After waking once, you can talk normally until you say go to sleep.")
         else:
             speak("Text mode: wake phrase is optional.")
 
@@ -386,14 +458,10 @@ def process(command, require_wake_word: bool = True):
             speak("I couldn't find Chrome on this PC.")
 
     elif (
-        "open repo" in command
-        or "open repository" in command
-        or "open github repo" in command
-        or "open github repository" in command
-        or "open your repo" in command
+        "open your repo" in command
         or "open your repository" in command
-        or ("open" in command and "github" in command and "repo" in command)
-        or ("open" in command and "github" in command and "repository" in command)
+        or ("open" in command and "your" in command and "github" in command and "repo" in command)
+        or ("open" in command and "your" in command and "github" in command and "repository" in command)
     ):
         speak("Opening the project repository on GitHub.")
         launched = _open_chrome(url=PROJECT_REPO_URL)
@@ -434,6 +502,10 @@ def process(command, require_wake_word: bool = True):
         speak("Opening current folder.")
         os.system("explorer .")
 
+    elif "exit folder" in command or "close folder" in command:
+        speak("Okay. Closing folder windows.")
+        _close_explorer_windows()
+
     elif "open" in command and "folder" in command:
         speak("Did you mean 'open folder'?")
         memory["pending_action"] = "open_folder"
@@ -465,8 +537,16 @@ def process(command, require_wake_word: bool = True):
         memory["pending_url"] = None
         save_memory(memory)
 
-    elif "exit" in command or "sleep" in command:
-        speak("Okay, I am going offline now.")
+    elif "go to sleep" in command or command.strip() == "sleep" or command.strip() == "exit":
+        speak("Okay. Going to sleep now.")
+
+        # Best-effort: close apps/sites that may have been opened.
+        try:
+            _close_common_apps_opened_by_riva()
+            _close_explorer_windows()
+        except Exception:
+            pass
+
         # Reset wake state so next time requires wake again.
         try:
             memory["awake_until"] = 0.0
