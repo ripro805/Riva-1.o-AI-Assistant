@@ -10,6 +10,10 @@ import subprocess
 import re
 import time
 import sys
+import urllib.request
+import urllib.error
+import urllib.parse
+from typing import Any
 from datetime import datetime
 
 from speech import speak
@@ -238,6 +242,123 @@ def _taskkill(image_name: str) -> bool:
         return False
 
 
+def _run_powershell(ps: str, *, sta: bool = False) -> str:
+    """Run a PowerShell snippet and return stdout (best-effort)."""
+    args = ["powershell"]
+    if sta:
+        args.append("-STA")
+    args.extend(["-NoProfile", "-Command", ps])
+    return subprocess.check_output(args, stderr=subprocess.DEVNULL, text=True)
+
+
+def _list_top_level_windows() -> list[dict[str, Any]]:
+    """Enumerate top-level windows (visible and background) on Windows.
+
+    Returns list of dicts: hwnd (int), pid (int), process (str), title (str), class (str)
+    """
+    if os.name != "nt":
+        return []
+
+    # Use user32 EnumWindows + GetWindowText + GetClassName.
+    # We include windows even if not visible (background) to satisfy detection rule.
+    ps = (
+        "Add-Type @'\n"
+        "using System;\n"
+        "using System.Text;\n"
+        "using System.Runtime.InteropServices;\n"
+        "public class Win32W {\n"
+        "  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);\n"
+        "  [DllImport(\"user32.dll\")] public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);\n"
+        "  [DllImport(\"user32.dll\")] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);\n"
+        "  [DllImport(\"user32.dll\")] public static extern int GetClassName(IntPtr hWnd, StringBuilder text, int count);\n"
+        "  [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);\n"
+        "}\n"
+        "'@; "
+        "$results = New-Object System.Collections.Generic.List[object]; "
+        "[Win32W]::EnumWindows({ param($h,$l) "
+        "  $sb = New-Object System.Text.StringBuilder 512; "
+        "  [void][Win32W]::GetWindowText($h, $sb, $sb.Capacity); $title=$sb.ToString(); "
+        "  $cb = New-Object System.Text.StringBuilder 256; "
+        "  [void][Win32W]::GetClassName($h, $cb, $cb.Capacity); $cls=$cb.ToString(); "
+        "  $pid=0; [void][Win32W]::GetWindowThreadProcessId($h, [ref]$pid); "
+        "  $pname=''; try { $pname=(Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName } catch { } "
+        "  $results.Add([pscustomobject]@{ hwnd=[int64]$h; pid=[int]$pid; process=$pname; title=$title; class=$cls }) | Out-Null; "
+        "  return $true "
+        "}, [IntPtr]::Zero) | Out-Null; "
+        "$results | ConvertTo-Json -Compress"
+    )
+    try:
+        out = _run_powershell(ps)
+        out = (out or "").strip()
+        if not out:
+            return []
+        data = json.loads(out)
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+        if isinstance(data, dict):
+            return [data]
+        return []
+    except Exception:
+        return []
+
+
+def _window_title_contains_any(title: str, needles: tuple[str, ...]) -> bool:
+    t = (title or "").lower()
+    return any(n.lower() in t for n in needles if n)
+
+
+def _detect_by_process_or_window(
+    *,
+    image_names: tuple[str, ...],
+    title_needles: tuple[str, ...],
+    process_name_needles: tuple[str, ...] = (),
+) -> tuple[bool, list[dict[str, Any]]]:
+    """Detection: scan running processes + scan windows.
+
+    Returns: (detected, matching_windows)
+    """
+    detected_proc = any(_is_process_running(n) for n in image_names if n)
+    wins = _list_top_level_windows()
+
+    matched: list[dict[str, Any]] = []
+    for w in wins:
+        pname = (w.get("process") or "").lower()
+        title = (w.get("title") or "")
+        if process_name_needles and not any(n.lower() == pname or n.lower() in pname for n in process_name_needles):
+            continue
+        if title_needles and not _window_title_contains_any(title, title_needles):
+            continue
+        matched.append(w)
+
+    detected = detected_proc or bool(matched)
+    return detected, matched
+
+
+def _close_windows_hwnd(hwnds: list[int]) -> bool:
+    """Try graceful close (WM_CLOSE) for the provided HWNDs."""
+    if os.name != "nt" or not hwnds:
+        return False
+    try:
+        joined = ",".join(str(int(h)) for h in hwnds if h)
+        ps = (
+            "Add-Type @'\n"
+            "using System;\n"
+            "using System.Runtime.InteropServices;\n"
+            "public class Win32C {\n"
+            "  public const int WM_CLOSE = 0x0010;\n"
+            "  [DllImport(\"user32.dll\")] public static extern bool PostMessage(IntPtr hWnd, int Msg, IntPtr wParam, IntPtr lParam);\n"
+            "}\n"
+            "'@; "
+            f"$hwnds=@({joined}); "
+            "foreach ($h in $hwnds) { try { [Win32C]::PostMessage([IntPtr]$h, [Win32C]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null } catch { } }; "
+            "'OK'"
+        )
+        _run_powershell(ps)
+        return True
+    except Exception:
+        return False
+
+
 def _close_common_apps_opened_by_riva() -> None:
     """Close common apps/sites Riva opens (best effort).
 
@@ -257,20 +378,289 @@ def _close_common_apps_opened_by_riva() -> None:
 
 
 def _close_app_target(target: str) -> bool:
-    """Close a supported application target. Returns True if we attempted a close."""
+    """Close a supported application target.
+
+    Detection-first policy:
+    - Scan processes
+    - Scan visible/background windows
+    Action:
+    - Try graceful close via WM_CLOSE
+    - Fallback to taskkill
+
+    Returns True if the target was detected (and we attempted to close it).
+    """
     t = (target or "").strip().lower()
-    if t in ("vscode", "vs code", "visual studio code"):
-        return _taskkill("Code.exe")
-    if t in ("whatsapp", "what's app", "what app"):
-        # WhatsApp Desktop variants
-        attempted = False
-        attempted = _taskkill("WhatsApp.exe") or attempted
-        attempted = _taskkill("WhatsAppApp.exe") or attempted
-        attempted = _taskkill("WhatsAppDesktop.exe") or attempted
-        return attempted
+
+    if t in ("vscode", "vs code", "visual studio code", "code"):
+        detected, wins = _detect_by_process_or_window(
+            image_names=("Code.exe",),
+            title_needles=("visual studio code",),
+            process_name_needles=("code",),
+        )
+        if not detected:
+            return False
+        hwnds = [int(w.get("hwnd") or 0) for w in wins if w.get("hwnd")]
+        _close_windows_hwnd(hwnds)
+        time.sleep(0.35)
+        if _is_process_running("Code.exe"):
+            _taskkill("Code.exe")
+        return True
+
+    if t in ("whatsapp", "whatsapp desktop", "what's app", "what app"):
+        detected, wins = _detect_by_process_or_window(
+            image_names=("WhatsApp.exe", "WhatsAppApp.exe", "WhatsAppDesktop.exe"),
+            title_needles=("whatsapp",),
+            process_name_needles=(),
+        )
+        if not detected:
+            return False
+        hwnds = [int(w.get("hwnd") or 0) for w in wins if w.get("hwnd")]
+        _close_windows_hwnd(hwnds)
+        time.sleep(0.35)
+        if _is_process_running("WhatsApp.exe") or _is_process_running("WhatsAppApp.exe") or _is_process_running("WhatsAppDesktop.exe"):
+            _taskkill("WhatsApp.exe")
+            _taskkill("WhatsAppApp.exe")
+            _taskkill("WhatsAppDesktop.exe")
+        return True
+
     if t in ("chrome", "google chrome"):
-        return _taskkill("chrome.exe")
+        detected, wins = _detect_by_process_or_window(
+            image_names=("chrome.exe",),
+            title_needles=(),
+            process_name_needles=("chrome",),
+        )
+        if not detected:
+            return False
+        hwnds = [int(w.get("hwnd") or 0) for w in wins if w.get("hwnd")]
+        _close_windows_hwnd(hwnds)
+        time.sleep(0.25)
+        if _is_process_running("chrome.exe"):
+            _taskkill("chrome.exe")
+        return True
+
     return False
+
+
+def _chrome_cdp_list_pages() -> list[dict[str, Any]]:
+    """List Chrome pages via DevTools (if Chrome was launched with remote debugging)."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:9222/json", timeout=0.35) as r:
+            raw = r.read().decode("utf-8", errors="ignore")
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+        return []
+    except Exception:
+        return []
+
+
+def _chrome_cdp_close_page(page_id: str) -> bool:
+    try:
+        if not page_id:
+            return False
+        url = f"http://127.0.0.1:9222/json/close/{urllib.parse.quote(page_id)}"
+        with urllib.request.urlopen(url, timeout=0.35) as r:
+            _ = r.read()
+        return True
+    except Exception:
+        return False
+
+
+def _get_active_chrome_url_if_foreground() -> tuple[bool, str]:
+    """Best-effort: read the active Chrome tab URL if Chrome is foreground.
+
+    Returns: (is_chrome_foreground, url_or_empty)
+    """
+    if os.name != "nt":
+        return False, ""
+
+    try:
+        ps = (
+            "Add-Type @'\n"
+            "using System;\n"
+            "using System.Runtime.InteropServices;\n"
+            "public class Win32A {\n"
+            "  [DllImport(\"user32.dll\")] public static extern IntPtr GetForegroundWindow();\n"
+            "  [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);\n"
+            "}\n"
+            "'@; "
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            "$hwnd=[Win32A]::GetForegroundWindow(); "
+            "$pid=0; [Win32A]::GetWindowThreadProcessId($hwnd, [ref]$pid) | Out-Null; "
+            "if ($pid -le 0) { 'NOTCHROME'; exit } ; "
+            "$p=Get-Process -Id $pid -ErrorAction SilentlyContinue; "
+            "if ($null -eq $p) { 'NOTCHROME'; exit } ; "
+            "if ($p.ProcessName -ne 'chrome') { 'NOTCHROME'; exit } ; "
+            "[System.Windows.Forms.SendKeys]::SendWait('^l'); Start-Sleep -Milliseconds 120; "
+            "[System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 120; "
+            "$url=[System.Windows.Forms.Clipboard]::GetText(); "
+            "if ([string]::IsNullOrWhiteSpace($url)) { 'URL:'; exit } ; "
+            "'URL:' + $url"
+        )
+        out = subprocess.check_output(
+            ["powershell", "-STA", "-NoProfile", "-Command", ps],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        if out.upper() == "NOTCHROME":
+            return False, ""
+        if out.startswith("URL:"):
+            return True, out[4:].strip()
+        return False, ""
+    except Exception:
+        return False, ""
+
+
+def _detect_chrome_tab_target(target: str) -> tuple[bool, str]:
+    """Detect whether a target tab appears to be open.
+
+    Returns: (found, method)
+    method: CDP | ACTIVE_TAB | WINDOW_TITLE | NONE
+    """
+    if not _is_process_running("chrome.exe"):
+        return False, "NONE"
+
+    t = (target or "").strip().lower()
+    if t == "youtube":
+        url_patterns = ("youtube.com", "youtu.be")
+        title_patterns = ("youtube",)
+    elif t == "facebook":
+        url_patterns = ("facebook.com",)
+        title_patterns = ("facebook",)
+    elif t == "gmail":
+        url_patterns = ("mail.google.com", "gmail.com")
+        title_patterns = ("gmail", "inbox")
+    else:
+        url_patterns = ("github.com",)
+        title_patterns = ("github",)
+
+    # 1) CDP (best): enumerate all tabs and check URL/title.
+    pages = _chrome_cdp_list_pages()
+    if pages:
+        for p in pages:
+            u = (p.get("url") or "").lower()
+            ti = (p.get("title") or "").lower()
+            if any(pat in u for pat in url_patterns) or any(pat in ti for pat in title_patterns):
+                return True, "CDP"
+
+    # 2) Foreground active-tab URL via clipboard (pure detection).
+    is_fg, url = _get_active_chrome_url_if_foreground()
+    if is_fg:
+        u = (url or "").lower()
+        if any(pat in u for pat in url_patterns):
+            return True, "ACTIVE_TAB"
+
+    # 3) Window-title detection (active tab titles per window).
+    wins = _list_top_level_windows()
+    for w in wins:
+        if (w.get("process") or "").lower() != "chrome":
+            continue
+        title = (w.get("title") or "")
+        if _window_title_contains_any(title, title_patterns):
+            return True, "WINDOW_TITLE"
+
+    return False, "NONE"
+
+
+def _close_chrome_tab_target(target: str) -> str:
+    """Close a Chrome tab target.
+
+    Returns one of:
+    - CHROME_NOT_RUNNING
+    - TAB_NOT_FOUND
+    - CLOSED
+    """
+    if not _is_process_running("chrome.exe"):
+        return "CHROME_NOT_RUNNING"
+
+    t = (target or "").strip().lower()
+    if t not in ("youtube", "facebook", "gmail", "repo", "github"):
+        return "TAB_NOT_FOUND"
+
+    # 1) CDP: enumerate and close the first matching page.
+    pages = _chrome_cdp_list_pages()
+    if pages:
+        if t == "youtube":
+            url_patterns = ("youtube.com", "youtu.be")
+        elif t == "facebook":
+            url_patterns = ("facebook.com",)
+        elif t == "gmail":
+            url_patterns = ("mail.google.com", "gmail.com")
+        else:
+            url_patterns = ("github.com",)
+
+        matches: list[dict[str, Any]] = []
+        for p in pages:
+            u = (p.get("url") or "").lower()
+            if any(pat in u for pat in url_patterns):
+                matches.append(p)
+
+        if matches:
+            # Prefer active if available; otherwise first match.
+            chosen = None
+            for m in matches:
+                if m.get("active") is True:
+                    chosen = m
+                    break
+            chosen = chosen or matches[0]
+            pid = str(chosen.get("id") or "")
+            if pid and _chrome_cdp_close_page(pid):
+                return "CLOSED"
+
+    # 2) Fallback: close active tab ONLY when Chrome is foreground (existing behavior).
+    res = _close_active_chrome_tab_for_target("github" if t in ("repo", "github") else t)
+    if res == "CLOSED":
+        return "CLOSED"
+
+    # 3) Last resort (no CDP, Chrome not foreground): activate a matching Chrome window by title and Ctrl+W.
+    if t == "youtube":
+        title_patterns = ("youtube",)
+    elif t == "facebook":
+        title_patterns = ("facebook",)
+    elif t == "gmail":
+        title_patterns = ("gmail",)
+    else:
+        title_patterns = ("github",)
+
+    try:
+        wins = _list_top_level_windows()
+        chosen_hwnd = 0
+        for w in wins:
+            if (w.get("process") or "").lower() != "chrome":
+                continue
+            title = (w.get("title") or "")
+            if _window_title_contains_any(title, title_patterns):
+                chosen_hwnd = int(w.get("hwnd") or 0)
+                break
+
+        if chosen_hwnd:
+            ps = (
+                "Add-Type @'\n"
+                "using System;\n"
+                "using System.Runtime.InteropServices;\n"
+                "public class Win32F {\n"
+                "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);\n"
+                "  [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\n"
+                "}\n"
+                "'@; "
+                "Add-Type -AssemblyName System.Windows.Forms; "
+                f"$h=[IntPtr]{chosen_hwnd}; "
+                "[Win32F]::ShowWindow($h, 5) | Out-Null; "  # SW_SHOW
+                "[Win32F]::SetForegroundWindow($h) | Out-Null; "
+                "Start-Sleep -Milliseconds 120; "
+                "[System.Windows.Forms.SendKeys]::SendWait('^w'); 'CLOSED'"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-STA", "-NoProfile", "-Command", ps],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            if (out or "").upper() == "CLOSED":
+                return "CLOSED"
+    except Exception:
+        pass
+
+    return "TAB_NOT_FOUND"
 
 
 def _is_process_running(image_name: str) -> bool:
@@ -709,9 +1099,9 @@ def process(command, require_wake_word: bool = True):
         if ("folder" in t) or ("currentfolder" in t_compact):
             closed = _close_active_explorer_window()
             if closed:
-                speak("The current folder has been closed.")
+                speak("Done.")
             else:
-                speak("That is not currently open.")
+                speak("No folder window is currently active.")
             return
 
         # Applications
@@ -739,17 +1129,12 @@ def process(command, require_wake_word: bool = True):
             return
 
         # Website tabs: best-effort only.
-        # We don't enumerate tabs; we only inspect the *active* Chrome tab.
         if (
             ("youtube" in t_compact) or ("youtu" in t_compact) or ("youtub" in t_compact)
             or ("facebook" in t_compact) or ("fb" == t_compact)
             or ("gmail" in t_compact) or ("mailgoogle" in t_compact)
             or ("repo" in t_compact) or ("github" in t_compact) or ("githu" in t_compact)
         ):
-            if not _is_process_running("chrome.exe"):
-                speak("That is not currently open.")
-                return
-
             if ("youtube" in t_compact) or ("youtu" in t_compact):
                 web_target = "youtube"
             elif ("facebook" in t_compact) or (t_compact == "fb"):
@@ -759,12 +1144,13 @@ def process(command, require_wake_word: bool = True):
             else:
                 web_target = "repo"
 
-            result = _close_active_chrome_tab_for_target(web_target)
-            if result == "CLOSED":
+            result = _close_chrome_tab_target(web_target)
+            if result == "CHROME_NOT_RUNNING":
+                speak("Chrome is not currently running.")
+            elif result == "CLOSED":
                 speak("Done.")
             else:
-                # NOTCHROME / NOTMATCH / NOURL / ERROR
-                speak("That is not currently open.")
+                speak("The tab is not currently open.")
             return
 
         speak("I can't close that target.")
