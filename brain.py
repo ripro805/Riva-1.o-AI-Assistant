@@ -385,6 +385,16 @@ def save_memory(data):
 def process(command, require_wake_word: bool = True):
     # Normalize
     command = (command or "").lower().strip()
+    # Whisper often returns trailing punctuation like "time." or "go to sleep.".
+    # Normalize by stripping most punctuation and collapsing whitespace.
+    try:
+        # Normalize smart quotes
+        command = command.replace("’", "'").replace("‘", "'")
+        # Keep letters/numbers/underscore/whitespace/apostrophe; drop the rest.
+        command = re.sub(r"[^\w\s']+", " ", command)
+        command = re.sub(r"\s+", " ", command).strip()
+    except Exception:
+        pass
 
     memory = load_memory()
 
