@@ -8,10 +8,12 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 
 ### 1. Wake-Up & Introduction
 
-- When woken up, Riva greets the user and introduces herself.
+- **Voice mode uses a wake phrase:** say **"hi riva"** or **"hey riva"**.
+- After you wake her once, **Riva stays awake until you say `exit` / `sleep`** (so you don't need to repeat the wake phrase).
 - Example:
-  - User: "Hey Riva!"
-  - Riva: "Hello! I'm Riva, your AI assistant created by MD. Rifat Islam Rizvi. I can open VS Code, open Chrome (YouTube/Facebook), check battery, open folders, shut down your PC, and more. What would you like to do first?"
+  - User: "Hi Riva"
+  - Riva: Introduces herself
+  - User: "Open YouTube" (no wake phrase needed now)
 
 - Fun and playful replies for casual or identity questions.
 
@@ -59,9 +61,25 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 ## How to Use
 
 1. Run the assistant script.
-2. Wake Riva with your chosen wake word.
-3. Speak or type commands.
-4. Riva responds in text or voice and performs supported actions.
+2. In **voice mode**, wake Riva once by saying: **"hi riva"** or **"hey riva"**.
+3. Then speak commands normally until you say **`exit`** / **`sleep`**.
+4. In **text mode**, you can type commands directly.
+5. Riva responds in text or voice and performs supported actions.
+
+---
+
+## Voice Accuracy Tips (Whisper)
+
+- Riva trims silence and uses tuned Whisper decoding settings to reduce ভুলভাল transcription.
+- If you speak Bangla/English mixed and detection gets confused, you can force language:
+  - `RIVA_STT_LANG=en` (English)
+  - `RIVA_STT_LANG=bn` (Bangla)
+
+## Optional Settings
+
+- `RIVA_AWAKE_WINDOW_SEC`
+  - How long (seconds) Riva stays awake after the wake phrase.
+  - Default: effectively "until exit/sleep".
 
 ---
 

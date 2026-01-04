@@ -258,7 +258,7 @@ def listen(verbose: bool = True):
     if verbose:
         print("Listening...")
     fs = 16000  # Sample rate
-    duration = 5  # seconds
+    duration = 7  # seconds (a bit longer helps reduce cut-off words)
     if verbose:
         print("Say something...")
 
@@ -271,8 +271,45 @@ def listen(verbose: bool = True):
     audio = np.squeeze(audio)
     # Convert to float32 for whisper
     audio = audio.astype(np.float32) / 32768.0
+
+    # Trim leading/trailing silence to reduce misreads.
+    try:
+        energy = np.abs(audio)
+        thr = max(0.012, float(np.percentile(energy, 85)) * 0.35)
+        idx = np.where(energy > thr)[0]
+        if idx.size > 0:
+            start = max(0, int(idx[0] - 0.10 * fs))
+            end = min(audio.shape[0], int(idx[-1] + 0.15 * fs))
+            audio = audio[start:end]
+    except Exception:
+        pass
+
+    if audio.size < int(0.25 * fs):
+        return ""
+
     model = _get_whisper_model()
-    result = model.transcribe(audio, fp16=False, language='en')
+
+    # Let Whisper auto-detect language (helps Bangla/English mixed commands).
+    # You can force a language via env var if you want (e.g., RIVA_STT_LANG=en or bn).
+    forced_lang = (os.environ.get("RIVA_STT_LANG") or "").strip() or None
+    initial_prompt = (
+        "You are a voice assistant named Riva. "
+        "Wake phrases: hi riva, hey riva. "
+        "Common commands: open chrome, open youtube, open facebook, open folder, battery, shutdown, time, exit, open whatsapp, open repo."
+    )
+
+    kwargs = dict(
+        fp16=False,
+        temperature=0.0,
+        best_of=5,
+        beam_size=5,
+        condition_on_previous_text=False,
+        initial_prompt=initial_prompt,
+    )
+    if forced_lang:
+        kwargs["language"] = forced_lang
+
+    result = model.transcribe(audio, **kwargs)
     command = result.get('text', '').strip()
     if command:
         if verbose:

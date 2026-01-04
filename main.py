@@ -5,12 +5,12 @@ from brain import process
 
 
 def run_voice_mode():
-    speak("Hi! I'm Riva, your AI assistant created by MD. Rifat Islam Rizvi. How can I help you today?")
+    speak("Voice mode is running. Say 'hi riva' or 'hey riva' to wake me up.")
     while True:
         command = listen()
         if command:
-            # Voice mode: wake word is optional for a smoother experience.
-            process(command, require_wake_word=False)
+            # Voice mode: wake phrase is required, and once awake it stays awake until exit/sleep.
+            process(command, require_wake_word=True)
 
 
 def run_text_mode():

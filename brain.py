@@ -4,6 +4,8 @@ import json
 import psutil
 import shutil
 import subprocess
+import re
+import time
 from datetime import datetime
 
 from speech import speak
@@ -12,6 +14,28 @@ from jokes import confused, greetings, random_reply
 
 MEMORY_FILE = "memory.json"
 WAKE_WORD = "riva"
+
+# Voice wake phrases. When require_wake_word=True, the command must start with
+# one of these phrases, e.g. "hi riva open chrome".
+_WAKE_PREFIX_RE = re.compile(r"^\s*(hi|hey)\s+riva\b[\s,!.:-]*", re.IGNORECASE)
+
+# After a wake phrase, keep accepting commands without repeating the wake phrase.
+# Default is effectively "until exit/sleep".
+_DEFAULT_AWAKE_WINDOW_SEC = 60 * 60 * 24 * 365 * 10  # 10 years
+
+# When asleep, don't spam reminders on every sentence.
+_DEFAULT_WAKE_REMINDER_COOLDOWN_SEC = 8
+
+
+def _strip_wake_prefix(command: str) -> tuple[bool, str]:
+    """Return (woke, remaining_command) after stripping a supported wake prefix."""
+    if not command:
+        return False, ""
+    m = _WAKE_PREFIX_RE.match(command)
+    if not m:
+        return False, command.strip()
+    rest = command[m.end():].strip()
+    return True, rest
 
 ASSISTANT_NAME = "Riva"
 CREATOR_NAME = "MD. Rifat Islam Rizvi"
@@ -153,6 +177,8 @@ def load_memory():
         # Backward-compatible defaults
         data.setdefault("pending_action", None)
         data.setdefault("pending_url", None)
+        data.setdefault("awake_until", 0.0)
+        data.setdefault("wake_reminder_until", 0.0)
         return data
 
 def save_memory(data):
@@ -220,18 +246,57 @@ def process(command, require_wake_word: bool = True):
         speak("Please say yes to confirm, or say cancel.")
         return
 
-    # Wake-word gate (optional). To make voice use nicer, we still allow greetings
-    # without the wake word.
-    if require_wake_word and WAKE_WORD not in command:
-        if "hello" in command or "hi" in command:
-            speak(random_reply(greetings))
-        return
-
-    # If wake word exists, remove it (even when require_wake_word=False)
+    # Wake gating.
+    # In voice mode (require_wake_word=True), Riva only responds after:
+    #   "hi riva" or "hey riva"
+    # After that, she stays awake until you say exit/sleep.
     woke = False
+    if require_wake_word:
+        now = time.time()
+        awake_until = float(memory.get("awake_until") or 0.0)
+        is_awake = now < awake_until
+
+        woke, stripped = _strip_wake_prefix(command)
+        if woke:
+            command = stripped
+            # Optional override: RIVA_AWAKE_WINDOW_SEC
+            window_raw = os.environ.get("RIVA_AWAKE_WINDOW_SEC", "")
+            try:
+                window = int(window_raw) if str(window_raw).strip() else int(_DEFAULT_AWAKE_WINDOW_SEC)
+            except Exception:
+                window = int(_DEFAULT_AWAKE_WINDOW_SEC)
+
+            memory["awake_until"] = now + max(3, window)
+            memory["wake_reminder_until"] = 0.0
+            save_memory(memory)
+        elif not is_awake:
+            # If they try to give a command while asleep, remind (with cooldown).
+            looks_like_command = any(k in command for k in (
+                "open",
+                "battery",
+                "shutdown",
+                "time",
+                "exit",
+                "sleep",
+                "help",
+                "commands",
+            ))
+            if looks_like_command:
+                remind_until = float(memory.get("wake_reminder_until") or 0.0)
+                if now >= remind_until:
+                    speak("Say 'hi riva' or 'hey riva' first.")
+                    memory["wake_reminder_until"] = now + _DEFAULT_WAKE_REMINDER_COOLDOWN_SEC
+                    save_memory(memory)
+            return
+    else:
+        # In text mode, wake word is optional. If 'riva' appears anywhere, strip it.
+        if WAKE_WORD in command:
+            command = command.replace(WAKE_WORD, "").strip()
+            woke = True
+
+    # If wake word exists, remove it (even when already awake).
     if WAKE_WORD in command:
         command = command.replace(WAKE_WORD, "").strip()
-        woke = True
 
     mood = get_mood()
     memory["last_command"] = command
@@ -267,11 +332,12 @@ def process(command, require_wake_word: bool = True):
         speak("Shutdown PC: say shutdown (I will ask you to confirm).")
         speak("Exit: say exit or sleep.")
 
-        # Mention wake word behavior (if enabled).
+        # Mention wake behavior.
         if require_wake_word:
-            speak(f"If wake word is enabled, say {WAKE_WORD} first.")
+            speak("Voice mode wake phrase: say 'hi riva' or 'hey riva'.")
+            speak("After waking once, you can talk normally until you say exit or sleep.")
         else:
-            speak("Wake word is optional.")
+            speak("Text mode: wake phrase is optional.")
 
     elif (
         "who are you" in command
@@ -402,6 +468,13 @@ def process(command, require_wake_word: bool = True):
 
     elif "exit" in command or "sleep" in command:
         speak("Okay, I am going offline now.")
+        # Reset wake state so next time requires wake again.
+        try:
+            memory["awake_until"] = 0.0
+            memory["wake_reminder_until"] = 0.0
+            save_memory(memory)
+        except Exception:
+            pass
         exit()
 
     else:
