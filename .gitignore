@@ -1,0 +1,41 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Build / distribution
+build/
+dist/
+.dist/
+*.egg-info/
+.eggs/
+
+# Test / tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# VS Code settings
+.vscode/
+
+# Local secrets / env files
+.env
+.env.*
+
+# Local runtime state (optional)
+memory.json
