@@ -1,7 +1,10 @@
 import os
 import random
 import json
-import psutil
+try:
+    import psutil  # type: ignore
+except Exception:  # pragma: no cover
+    psutil = None
 import shutil
 import subprocess
 import re
@@ -273,10 +276,21 @@ def _is_process_running(image_name: str) -> bool:
     """Return True if a process with this image name appears to be running."""
     try:
         target = (image_name or "").lower()
-        for p in psutil.process_iter(["name"]):
-            name = (p.info.get("name") or "").lower()
-            if name == target:
-                return True
+        if psutil is not None:
+            for p in psutil.process_iter(["name"]):
+                name = (p.info.get("name") or "").lower()
+                if name == target:
+                    return True
+            return False
+
+        # Fallback (Windows): tasklist
+        if os.name == "nt" and target:
+            out = subprocess.check_output(
+                ["tasklist", "/FI", f"IMAGENAME eq {target}"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            )
+            return target in out.lower()
     except Exception:
         pass
     return False
@@ -632,8 +646,14 @@ def process(command, require_wake_word: bool = True):
         save_memory(memory)
 
     elif "battery" in command:
-        battery = psutil.sensors_battery()
-        speak(f"Battery is {battery.percent} percent.")
+        if psutil is None:
+            speak("Battery status is unavailable because the 'psutil' package is not installed.")
+        else:
+            battery = psutil.sensors_battery()
+            if battery is None:
+                speak("I couldn't read the battery status on this device.")
+            else:
+                speak(f"Battery is {battery.percent} percent.")
 
     elif (
         "time" == command
@@ -680,8 +700,12 @@ def process(command, require_wake_word: bool = True):
             speak("Please say close and then the target.")
             return
 
+        # Normalize target for more robust matching (Whisper often inserts extra words/spaces).
+        t = target.lower().strip()
+        t_compact = t.replace("'", "").replace(" ", "")
+
         # Folder: close ONLY the active explorer window
-        if target in ("folder", "current folder"):
+        if ("folder" in t) or ("currentfolder" in t_compact):
             closed = _close_active_explorer_window()
             if closed:
                 speak("The current folder has been closed.")
@@ -690,8 +714,23 @@ def process(command, require_wake_word: bool = True):
             return
 
         # Applications
-        if target in ("vscode", "vs code", "visual studio code", "whatsapp", "chrome", "google chrome"):
-            attempted = _close_app_target(target)
+        if (
+            ("vscode" in t_compact)
+            or ("visualstudiocode" in t_compact)
+            or ("whatsapp" in t_compact)
+            or ("whatsapp" in t_compact)
+            or ("whatapp" in t_compact)
+            or ("chrome" in t_compact)
+        ):
+            # Choose a canonical app target for the closer.
+            if "chrome" in t_compact:
+                app_target = "chrome"
+            elif "vscode" in t_compact or "visualstudiocode" in t_compact:
+                app_target = "vscode"
+            else:
+                app_target = "whatsapp"
+
+            attempted = _close_app_target(app_target)
             if attempted:
                 speak("Done.")
             else:
@@ -700,12 +739,26 @@ def process(command, require_wake_word: bool = True):
 
         # Website tabs: best-effort only.
         # We don't enumerate tabs; we only inspect the *active* Chrome tab.
-        if target in ("youtube", "facebook", "gmail", "repo", "github"):
+        if (
+            ("youtube" in t_compact) or ("youtu" in t_compact) or ("youtub" in t_compact)
+            or ("facebook" in t_compact) or ("fb" == t_compact)
+            or ("gmail" in t_compact) or ("mailgoogle" in t_compact)
+            or ("repo" in t_compact) or ("github" in t_compact) or ("githu" in t_compact)
+        ):
             if not _is_process_running("chrome.exe"):
                 speak("That is not currently open.")
                 return
 
-            result = _close_active_chrome_tab_for_target(target)
+            if ("youtube" in t_compact) or ("youtu" in t_compact):
+                web_target = "youtube"
+            elif ("facebook" in t_compact) or (t_compact == "fb"):
+                web_target = "facebook"
+            elif ("gmail" in t_compact) or ("mailgoogle" in t_compact):
+                web_target = "gmail"
+            else:
+                web_target = "repo"
+
+            result = _close_active_chrome_tab_for_target(web_target)
             if result == "CLOSED":
                 speak("Done.")
             else:

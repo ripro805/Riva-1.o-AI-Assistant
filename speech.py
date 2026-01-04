@@ -1,7 +1,22 @@
-import pyttsx3
-import sounddevice as sd
-import numpy as np
-import whisper
+try:
+    import pyttsx3  # type: ignore
+except Exception:  # pragma: no cover
+    pyttsx3 = None
+
+try:
+    import sounddevice as sd  # type: ignore
+except Exception:  # pragma: no cover
+    sd = None
+
+try:
+    import numpy as np  # type: ignore
+except Exception:  # pragma: no cover
+    np = None
+
+try:
+    import whisper  # type: ignore
+except Exception:  # pragma: no cover
+    whisper = None
 import sys
 import subprocess
 import os
@@ -91,6 +106,8 @@ def _sanitize_for_speech(text: str) -> str:
 
 def _init_tts_engine():
     """Initialize TTS engine with sensible defaults (Windows-friendly)."""
+    if pyttsx3 is None:
+        return None
     try:
         # On Windows, using SAPI5 explicitly is usually the most reliable.
         if sys.platform.startswith("win"):
@@ -102,8 +119,12 @@ def _init_tts_engine():
 
 
 engine = _init_tts_engine()
-engine.setProperty("rate", 170)
-engine.setProperty("volume", 1.0)
+if engine is not None:
+    try:
+        engine.setProperty("rate", 170)
+        engine.setProperty("volume", 1.0)
+    except Exception:
+        pass
 
 
 def _pick_preferred_windows_voice_name() -> Optional[str]:
@@ -167,28 +188,29 @@ _WINDOWS_VOICE_NAME: Optional[str] = _pick_preferred_windows_voice_name()
 
 # Pick a default voice if available (prevents "silent" engine on some setups)
 try:
-    voices = engine.getProperty("voices")
-    if voices:
-        # Try to align pyttsx3 voice with our Windows preference.
-        chosen = None
-        if _WINDOWS_VOICE_NAME:
-            pref = _WINDOWS_VOICE_NAME.lower()
-            for v in voices:
-                name = (getattr(v, "name", "") or "").lower()
-                vid = (getattr(v, "id", "") or "").lower()
-                if pref in name or pref in vid:
-                    chosen = v
-                    break
+    if engine is not None:
+        voices = engine.getProperty("voices")
+        if voices:
+            # Try to align pyttsx3 voice with our Windows preference.
+            chosen = None
+            if _WINDOWS_VOICE_NAME:
+                pref = _WINDOWS_VOICE_NAME.lower()
+                for v in voices:
+                    name = (getattr(v, "name", "") or "").lower()
+                    vid = (getattr(v, "id", "") or "").lower()
+                    if pref in name or pref in vid:
+                        chosen = v
+                        break
 
-        # Otherwise, try to pick a "female" voice if the engine exposes it.
-        if chosen is None:
-            for v in voices:
-                meta = (getattr(v, "name", "") or "") + " " + (getattr(v, "id", "") or "")
-                if "zira" in meta.lower() or "female" in meta.lower():
-                    chosen = v
-                    break
+            # Otherwise, try to pick a "female" voice if the engine exposes it.
+            if chosen is None:
+                for v in voices:
+                    meta = (getattr(v, "name", "") or "") + " " + (getattr(v, "id", "") or "")
+                    if "zira" in meta.lower() or "female" in meta.lower():
+                        chosen = v
+                        break
 
-        engine.setProperty("voice", (chosen or voices[0]).id)
+            engine.setProperty("voice", (chosen or voices[0]).id)
 except Exception:
     pass
 
@@ -199,6 +221,8 @@ _WHISPER_MODEL = None
 def _get_whisper_model():
     global _WHISPER_MODEL
     if _WHISPER_MODEL is None:
+        if whisper is None:
+            raise RuntimeError("Whisper is not available. Please install the 'openai-whisper' package.")
         _WHISPER_MODEL = whisper.load_model("base")
     return _WHISPER_MODEL
 
@@ -243,17 +267,29 @@ def speak(text):
                 except Exception as e:
                     print(f"[tts windows fallback error] {e}")
 
-            try:
-                engine.say(cleaned)
-                engine.runAndWait()
-            except Exception as e:
-                print(f"[tts error] {e}")
+            if engine is not None:
+                try:
+                    engine.say(cleaned)
+                    engine.runAndWait()
+                except Exception as e:
+                    print(f"[tts error] {e}")
         finally:
             global _LAST_SPEAK_END_MONO
             _LAST_SPEAK_END_MONO = time.monotonic()
             _SPEAKING.clear()
 
 def listen(verbose: bool = True):
+    if sd is None or np is None or whisper is None:
+        # Keep the process alive even if audio deps aren't installed.
+        if verbose:
+            missing = [
+                name
+                for name, mod in (("sounddevice", sd), ("numpy", np), ("whisper", whisper))
+                if mod is None
+            ]
+            print(f"[listen unavailable] Missing dependencies: {', '.join(missing)}")
+        return ""
+
     _wait_for_safe_listen_window()
     if verbose:
         print("Listening...")
