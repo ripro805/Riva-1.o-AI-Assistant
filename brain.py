@@ -373,6 +373,69 @@ def _window_title_contains_any(title: str, needles: tuple[str, ...]) -> bool:
     return any(n.lower() in t for n in needles if n)
 
 
+def _is_chrome_window(w: dict[str, Any]) -> bool:
+    """Best-effort check whether a window looks like a Chrome top-level window."""
+    cls = (w.get("class") or "").lower()
+    title = (w.get("title") or "").lower()
+    proc = (w.get("process") or "").lower()
+    if proc == "chrome" or "chrome" in proc:
+        return True
+    if cls.startswith("chrome_widgetwin"):
+        return True
+    if "google chrome" in title:
+        return True
+    return False
+
+
+def _activate_hwnd_and_get_active_chrome_url(hwnd: int) -> tuple[bool, str]:
+    """Bring a window to foreground, and if it's Chrome, read active tab URL.
+
+    Returns: (is_chrome_window, url_or_empty)
+    """
+    if os.name != "nt" or not hwnd:
+        return False, ""
+
+    try:
+        ps = (
+            "Add-Type @'\n"
+            "using System;\n"
+            "using System.Runtime.InteropServices;\n"
+            "public class Win32X {\n"
+            "  [DllImport(\"user32.dll\")] public static extern bool SetForegroundWindow(IntPtr hWnd);\n"
+            "  [DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);\n"
+            "  [DllImport(\"user32.dll\")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);\n"
+            "}\n"
+            "'@; "
+            "Add-Type -AssemblyName System.Windows.Forms; "
+            f"$h=[IntPtr]{int(hwnd)}; "
+            "[Win32X]::ShowWindow($h, 5) | Out-Null; "
+            "[Win32X]::SetForegroundWindow($h) | Out-Null; "
+            "Start-Sleep -Milliseconds 160; "
+            "$pid=0; [Win32X]::GetWindowThreadProcessId($h, [ref]$pid) | Out-Null; "
+            "if ($pid -le 0) { 'NOTCHROME'; exit } ; "
+            "$p=Get-Process -Id $pid -ErrorAction SilentlyContinue; "
+            "if ($null -eq $p) { 'NOTCHROME'; exit } ; "
+            "if ($p.ProcessName -ne 'chrome') { 'NOTCHROME'; exit } ; "
+            "[System.Windows.Forms.SendKeys]::SendWait('^l'); Start-Sleep -Milliseconds 120; "
+            "[System.Windows.Forms.SendKeys]::SendWait('^c'); Start-Sleep -Milliseconds 120; "
+            "$url=[System.Windows.Forms.Clipboard]::GetText(); "
+            "if ([string]::IsNullOrWhiteSpace($url)) { 'URL:'; exit } ; "
+            "'URL:' + $url"
+        )
+        out = subprocess.check_output(
+            ["powershell", "-STA", "-NoProfile", "-Command", ps],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        if out.upper() == "NOTCHROME":
+            return False, ""
+        if out.startswith("URL:"):
+            return True, out[4:].strip()
+        return False, ""
+    except Exception:
+        return False, ""
+
+
 def _detect_by_process_or_window(
     *,
     image_names: tuple[str, ...],
@@ -616,14 +679,28 @@ def _detect_chrome_tab_target(target: str) -> tuple[bool, str]:
         if any(pat in u for pat in url_patterns):
             return True, "ACTIVE_TAB"
 
-    # 3) Window-title detection (active tab titles per window).
+    # 3) Window-title detection (active tab title per window).
     wins = _list_top_level_windows()
     for w in wins:
-        if (w.get("process") or "").lower() != "chrome":
+        if not _is_chrome_window(w):
             continue
         title = (w.get("title") or "")
         if _window_title_contains_any(title, title_patterns):
             return True, "WINDOW_TITLE"
+
+    # 4) URL scan across Chrome windows (best-effort, may briefly focus windows).
+    for w in wins:
+        if not _is_chrome_window(w):
+            continue
+        hwnd = int(w.get("hwnd") or 0)
+        if not hwnd:
+            continue
+        is_chrome, url = _activate_hwnd_and_get_active_chrome_url(hwnd)
+        if not is_chrome:
+            continue
+        u = (url or "").lower()
+        if any(pat in u for pat in url_patterns):
+            return True, "WINDOW_URL_SCAN"
 
     return False, "NONE"
 
@@ -692,7 +769,7 @@ def _close_chrome_tab_target(target: str) -> str:
         wins = _list_top_level_windows()
         chosen_hwnd = 0
         for w in wins:
-            if (w.get("process") or "").lower() != "chrome":
+            if not _is_chrome_window(w):
                 continue
             title = (w.get("title") or "")
             if _window_title_contains_any(title, title_patterns):
@@ -714,6 +791,46 @@ def _close_chrome_tab_target(target: str) -> str:
                 "[Win32F]::ShowWindow($h, 5) | Out-Null; "  # SW_SHOW
                 "[Win32F]::SetForegroundWindow($h) | Out-Null; "
                 "Start-Sleep -Milliseconds 120; "
+                "[System.Windows.Forms.SendKeys]::SendWait('^w'); 'CLOSED'"
+            )
+            out = subprocess.check_output(
+                ["powershell", "-STA", "-NoProfile", "-Command", ps],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+            if (out or "").upper() == "CLOSED":
+                return "CLOSED"
+    except Exception:
+        pass
+
+    # 4) URL scan close (best-effort): iterate Chrome windows, activate each, match URL, then Ctrl+W.
+    try:
+        if t == "youtube":
+            url_patterns = ("youtube.com", "youtu.be")
+        elif t == "facebook":
+            url_patterns = ("facebook.com",)
+        elif t == "gmail":
+            url_patterns = ("mail.google.com", "gmail.com")
+        else:
+            url_patterns = ("github.com",)
+
+        wins = _list_top_level_windows()
+        for w in wins:
+            if not _is_chrome_window(w):
+                continue
+            hwnd = int(w.get("hwnd") or 0)
+            if not hwnd:
+                continue
+            is_chrome, url = _activate_hwnd_and_get_active_chrome_url(hwnd)
+            if not is_chrome:
+                continue
+            u = (url or "").lower()
+            if not any(pat in u for pat in url_patterns):
+                continue
+
+            # Close active tab
+            ps = (
+                "Add-Type -AssemblyName System.Windows.Forms; "
                 "[System.Windows.Forms.SendKeys]::SendWait('^w'); 'CLOSED'"
             )
             out = subprocess.check_output(
