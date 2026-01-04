@@ -4,10 +4,12 @@ import numpy as np
 import whisper
 import sys
 import subprocess
+import os
 import unicodedata
 import re
 import threading
 import time
+from typing import Optional
 
 
 _ALLOWED_PUNCTUATION = set(".,?!:;।-—()[]{}'\"/\\")
@@ -103,11 +105,90 @@ engine = _init_tts_engine()
 engine.setProperty("rate", 170)
 engine.setProperty("volume", 1.0)
 
+
+def _pick_preferred_windows_voice_name() -> Optional[str]:
+    """Pick a likely female System.Speech voice if installed.
+
+    Returns a voice name (e.g., "Microsoft Zira Desktop") or None.
+    """
+    if not sys.platform.startswith("win"):
+        return None
+
+    # Allow user override.
+    env_name = (os.environ.get("RIVA_VOICE") or "").strip()
+    if env_name:
+        return env_name
+
+    preferred = [
+        # Common Windows female voices (names vary by Windows version/language pack)
+        "Microsoft Zira Desktop",
+        "Microsoft Hazel Desktop",
+        "Microsoft Susan",
+        "Microsoft Aria",
+        "Microsoft Jenny",
+        "Microsoft Sonia",
+    ]
+
+    try:
+        out = subprocess.check_output(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                "Add-Type -AssemblyName System.Speech; "
+                "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+                "$s.GetInstalledVoices() | ForEach-Object { $_.VoiceInfo.Name }",
+            ],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        )
+        voices = [v.strip() for v in out.splitlines() if v.strip()]
+        if not voices:
+            return None
+
+        # First try exact preferred names.
+        for p in preferred:
+            if p in voices:
+                return p
+
+        # Then try fuzzy match (contains preferred token).
+        lowered = {v.lower(): v for v in voices}
+        for token in ("zira", "hazel", "aria", "jenny", "susan", "sonia"):
+            for k, original in lowered.items():
+                if token in k:
+                    return original
+
+        return None
+    except Exception:
+        return None
+
+
+_WINDOWS_VOICE_NAME: Optional[str] = _pick_preferred_windows_voice_name()
+
 # Pick a default voice if available (prevents "silent" engine on some setups)
 try:
     voices = engine.getProperty("voices")
     if voices:
-        engine.setProperty("voice", voices[0].id)
+        # Try to align pyttsx3 voice with our Windows preference.
+        chosen = None
+        if _WINDOWS_VOICE_NAME:
+            pref = _WINDOWS_VOICE_NAME.lower()
+            for v in voices:
+                name = (getattr(v, "name", "") or "").lower()
+                vid = (getattr(v, "id", "") or "").lower()
+                if pref in name or pref in vid:
+                    chosen = v
+                    break
+
+        # Otherwise, try to pick a "female" voice if the engine exposes it.
+        if chosen is None:
+            for v in voices:
+                meta = (getattr(v, "name", "") or "") + " " + (getattr(v, "id", "") or "")
+                if "zira" in meta.lower() or "female" in meta.lower():
+                    chosen = v
+                    break
+
+        engine.setProperty("voice", (chosen or voices[0]).id)
 except Exception:
     pass
 
@@ -138,6 +219,11 @@ def speak(text):
             if sys.platform.startswith("win"):
                 try:
                     ps_text = cleaned.replace("'", "''")
+                    ps_voice = (_WINDOWS_VOICE_NAME or "").replace("'", "''")
+                    # If a preferred voice is known, select it (ignore failures).
+                    select_voice = ""
+                    if ps_voice:
+                        select_voice = f"try {{ $s.SelectVoice('{ps_voice}'); }} catch {{ }}; "
                     subprocess.run(
                         [
                             "powershell",
@@ -146,6 +232,7 @@ def speak(text):
                             "Add-Type -AssemblyName System.Speech; "
                             "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer; "
                             "$s.Volume=100; $s.Rate=0; "
+                            + select_voice +
                             f"$s.Speak('{ps_text}');",
                         ],
                         check=False,
