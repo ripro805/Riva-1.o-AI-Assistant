@@ -9,6 +9,10 @@ if exist ".venv\Scripts\activate.bat" (
   call ".venv\Scripts\activate.bat"
 )
 
+REM Optional: pin a fixed Chrome profile (prevents the profile picker).
+REM Examples: "Default", "Profile 1", "Profile 2"
+REM set "RIVA_CHROME_PROFILE_DIR=Default"
+
 python .\main.py --voice
 
 endlocal

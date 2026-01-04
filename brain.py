@@ -51,6 +51,13 @@ CREATOR_NAME = "MD. Rifat Islam Rizvi"
 
 PROJECT_REPO_URL = "https://github.com/ripro805/Riva-1.o-AI-Assistant"
 
+# If you have multiple Chrome profiles, launching Chrome without specifying one can
+# open the profile picker. We pin a profile directory by default.
+# Override with env vars:
+# - RIVA_CHROME_PROFILE_DIR (e.g., "Default", "Profile 1")
+# - RIVA_CHROME_USER_DATA_DIR (optional full path to Chrome User Data)
+_DEFAULT_CHROME_PROFILE_DIR = "Default"
+
 
 _SITE_TARGETS: list[tuple[str, str, tuple[str, ...]]] = [
     ("Facebook", "https://www.facebook.com/", ("facebook", "face book", "fb")),
@@ -133,7 +140,16 @@ def _open_chrome(url: str | None = None) -> bool:
     """
     chrome = _find_chrome_exe()
     if chrome:
+        # Pin a specific Chrome profile to avoid the profile picker UI.
+        profile_dir = (os.environ.get("RIVA_CHROME_PROFILE_DIR") or "").strip() or _DEFAULT_CHROME_PROFILE_DIR
+        user_data_dir = (os.environ.get("RIVA_CHROME_USER_DATA_DIR") or "").strip()
+
         args = [chrome]
+        if user_data_dir:
+            args.append(f"--user-data-dir={user_data_dir}")
+        if profile_dir:
+            args.append(f"--profile-directory={profile_dir}")
+
         if url:
             # Passing a URL typically opens a new tab if Chrome is already running.
             args.extend(["--new-tab", url])
