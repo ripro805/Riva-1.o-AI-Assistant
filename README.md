@@ -1,6 +1,6 @@
-# Riva AI Assistant
+# Riva1.o AI Assistant
 
-Riva is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond in both text and voice mode, perform system tasks, and interact naturally with the user in a friendly way.
+Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond in both text and voice mode, perform system tasks, and interact naturally with the user in a friendly way.
 
 ---
 
