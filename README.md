@@ -25,7 +25,8 @@ Riva1.o is an AI assistant created by **MD. Rifat Islam Rizvi**. She can respond
 | `open facebook`  | Opens Facebook in Chrome (new tab)    | Also accepts: `new tab facebook`, `open tab facebook`, `open fb` |
 | `open gmail`     | Opens Gmail in Chrome (new tab)       | - |
 | `open google`    | Opens Google in Chrome (new tab)      | - |
-| `open whatsapp`  | Opens WhatsApp Web in Chrome (new tab)| - |
+| `open whatsapp`  | Opens WhatsApp Desktop app            | Falls back to WhatsApp Web if the app is not available |
+| `open whatsapp web` | Opens WhatsApp Web in Chrome (new tab) | Also accepts: `web whatsapp` |
 | `open instagram` | Opens Instagram in Chrome (new tab)   | Also accepts: `open insta` |
 | `open folder`    | Opens the current folder in Explorer  | - |
 | `battery`        | Speaks the current battery percentage | - |
