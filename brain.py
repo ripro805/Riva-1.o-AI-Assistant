@@ -17,6 +17,9 @@ ASSISTANT_NAME = "Riva"
 CREATOR_NAME = "MD. Rifat Islam Rizvi"
 
 
+PROJECT_REPO_URL = "https://github.com/ripro805/Riva-1.o-AI-Assistant"
+
+
 _SITE_TARGETS: list[tuple[str, str, tuple[str, ...]]] = [
     ("Facebook", "https://www.facebook.com/", ("facebook", "face book", "fb")),
     ("YouTube", "https://www.youtube.com/", ("youtube", "you tube")),
@@ -256,6 +259,7 @@ def process(command, require_wake_word: bool = True):
         speak("Open VS Code: say open vs code.")
         speak("Open Chrome: say open chrome.")
         speak("Open a site in Chrome: say open youtube or open facebook.")
+        speak("Open this project's GitHub repo: say open repo.")
         speak("Open WhatsApp app: say open whatsapp.")
         speak("Open WhatsApp Web in Chrome: say open whatsapp web.")
         speak("Open current folder: say open folder.")
@@ -315,6 +319,19 @@ def process(command, require_wake_word: bool = True):
         launched = _open_chrome()
         if not launched:
             speak("I couldn't find Chrome on this PC.")
+
+    elif (
+        "open repo" in command
+        or "open repository" in command
+        or "open github repo" in command
+        or "open github repository" in command
+        or ("open" in command and "github" in command and "repo" in command)
+        or ("open" in command and "github" in command and "repository" in command)
+    ):
+        speak("Opening the project repository on GitHub.")
+        launched = _open_chrome(url=PROJECT_REPO_URL)
+        if not launched:
+            speak("I couldn't find Chrome, so I opened it in your default browser.")
 
     # WhatsApp Desktop (prefer app over web)
     elif (
