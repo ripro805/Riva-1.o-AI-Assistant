@@ -59,6 +59,46 @@ PROJECT_REPO_URL = "https://github.com/ripro805/Riva-1.o-AI-Assistant"
 _DEFAULT_CHROME_PROFILE_DIR = "Default"
 
 
+def _default_chrome_user_data_dir() -> str:
+    """Return the default Chrome User Data directory on this OS (best-effort)."""
+    if os.name == "nt":
+        lad = os.environ.get("LOCALAPPDATA")
+        if lad:
+            return os.path.join(lad, "Google", "Chrome", "User Data")
+    # Generic fallback (may not exist)
+    return os.path.join(os.path.expanduser("~"), "AppData", "Local", "Google", "Chrome", "User Data")
+
+
+def _find_chrome_profile_dir_by_display_name(display_name: str, user_data_dir: str | None = None) -> str | None:
+    """Map a human profile name (shown in profile picker) to a profile directory.
+
+    Example: display_name='Rifat Rizvi' -> 'Profile 2'
+    Uses Chrome's "Local State" info_cache.
+    """
+    name = (display_name or "").strip().lower()
+    if not name:
+        return None
+
+    udd = (user_data_dir or "").strip() or _default_chrome_user_data_dir()
+    local_state = os.path.join(udd, "Local State")
+    try:
+        with open(local_state, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        cache = (((data or {}).get("profile") or {}).get("info_cache") or {})
+        if isinstance(cache, dict):
+            for profile_dir, info in cache.items():
+                if not isinstance(info, dict):
+                    continue
+                disp = (info.get("name") or "").strip().lower()
+                # Some installs store gaia/given name variations; keep it simple: substring match.
+                if disp and (disp == name or name in disp or disp in name):
+                    return str(profile_dir)
+    except Exception:
+        return None
+
+    return None
+
+
 _SITE_TARGETS: list[tuple[str, str, tuple[str, ...]]] = [
     ("Facebook", "https://www.facebook.com/", ("facebook", "face book", "fb")),
     ("YouTube", "https://www.youtube.com/", ("youtube", "you tube")),
@@ -141,8 +181,18 @@ def _open_chrome(url: str | None = None) -> bool:
     chrome = _find_chrome_exe()
     if chrome:
         # Pin a specific Chrome profile to avoid the profile picker UI.
-        profile_dir = (os.environ.get("RIVA_CHROME_PROFILE_DIR") or "").strip() or _DEFAULT_CHROME_PROFILE_DIR
         user_data_dir = (os.environ.get("RIVA_CHROME_USER_DATA_DIR") or "").strip()
+        profile_name = (os.environ.get("RIVA_CHROME_PROFILE_NAME") or "").strip()
+
+        resolved_profile_dir = None
+        if profile_name:
+            resolved_profile_dir = _find_chrome_profile_dir_by_display_name(profile_name, user_data_dir or None)
+
+        profile_dir = (
+            resolved_profile_dir
+            or (os.environ.get("RIVA_CHROME_PROFILE_DIR") or "").strip()
+            or _DEFAULT_CHROME_PROFILE_DIR
+        )
 
         args = [chrome]
         if user_data_dir:
